@@ -1,5 +1,6 @@
 package com.msx7.nas.syncphotos
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -39,6 +40,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCompositionContext
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,6 +51,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.Role.Companion.Button
 import androidx.compose.ui.text.TextStyle
@@ -63,18 +67,27 @@ import androidx.compose.ui.unit.TextUnitType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.lifecycle.LifecycleCoroutineScope
 import androidx.lifecycle.ViewModel
+import com.msx7.nas.syncphotos.data.LocalStorage
+import com.msx7.nas.syncphotos.model.LoginModel
 import com.msx7.nas.syncphotos.ui.theme.SyncPhotosTheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.updateAndGet
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        if (loginJump()) {
+            return
+        }
         setContent {
             val focusManager = LocalFocusManager.current
             SyncPhotosTheme {
@@ -96,33 +109,39 @@ class MainActivity : ComponentActivity() {
                             ),
                         contentAlignment = Alignment.Center
                     ) {
-                        GreetingPreview()
+                        GreetingPreview(vm)
                     }
 
                 }
             }
         }
     }
+
+    private fun loginJump(): Boolean {
+        if (LocalStorage.instance.isLogin()) {
+            this.startActivity(Intent(this, AlbumActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK)
+            })
+            return true
+        }
+        return false
+    }
+
+    val vm = LoginModel()
 }
 
-private val _uiState = MutableStateFlow(LoginModel())
-val uiState = _uiState.asStateFlow()
 
 @Preview(showBackground = true)
 @Composable
-fun GreetingPreview() {
-
-    if (_uiState.value.isLogin) {
+fun GreetingPreview(vm: LoginModel = LoginModel()) {
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    if (vm.isLogin) {
         Dialog(
             properties = DialogProperties(
                 dismissOnBackPress = true
             ),
             onDismissRequest = {
-                _uiState.update {
-                    it.copy(
-                        isLogin = false
-                    )
-                }
 
             },
         ) {
@@ -140,9 +159,9 @@ fun GreetingPreview() {
                 .padding(horizontal = 32.dp, vertical = 12.dp)
         ) {
             OutlinedTextField(
-                uiState.value.username,
+                vm.loginUiState.userName,
                 onValueChange = { a ->
-                    if (a.length < 32) _uiState.update { it.copy(username = a) }
+                    vm.updateUserName(a)
                 },
                 singleLine = true,
                 placeholder = {
@@ -158,9 +177,9 @@ fun GreetingPreview() {
             )
             Box(modifier = Modifier.height(10.dp))
             OutlinedTextField(
-                uiState.value.password,
+                vm.loginUiState.password,
                 onValueChange = { a ->
-                    if (a.length < 16) _uiState.update { it.copy(password = a) }
+                    vm.updatePassword(a)
                 },
                 singleLine = true,
                 placeholder = {
@@ -186,6 +205,9 @@ fun GreetingPreview() {
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
                     .shadow(3.dp, shape = RoundedCornerShape(100.dp))
+                    .clickable {
+                        scope.launch { vm.login(context) }
+                    }
                     .background(
                         brush = Brush.linearGradient(
                             colors = listOf(
@@ -197,9 +219,7 @@ fun GreetingPreview() {
                     )
                     .width(160.dp)
                     .padding(vertical = 20.dp)
-                    .clickable {
-                        _uiState.update { it.copy(isLogin = true) }
-                    }
+
 
             ) {
                 Text(
@@ -213,48 +233,5 @@ fun GreetingPreview() {
             }
         }
 
-    }
-}
-
-// 定义界面状态
-data class LoginUiState(
-    val username: String = "",
-    val password: String = "",
-    val isLoading: Boolean = false,
-    val errorMessage: String? = null
-)
-
-// ViewModel 实现
-class LoginViewModel : ViewModel() {
-    private val _uiState = MutableStateFlow(LoginUiState())
-    val uiState: StateFlow<LoginUiState> = _uiState.asStateFlow()
-
-    fun onEvent(event: LoginEvent) {
-        when (event) {
-            is LoginEvent.OnUsernameChanged -> {
-                _uiState.update { it.copy(username = event.username) }
-            }
-            is LoginEvent.OnPasswordChanged -> {
-                _uiState.update { it.copy(password = event.password) }
-            }
-            is LoginEvent.OnLoginClicked -> {
-                login()
-            }
-        }
-    }
-
-    private fun login() {
-        viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
-            // 模拟网络请求
-            delay(2000)
-            val success = _uiState.value.username == "user" && _uiState.value.password == "pass"
-            if (success) {
-                _uiState.update { it.copy(isLoading = false) }
-                // 处理登录成功
-            } else {
-                _uiState.update { it.copy(isLoading = false, errorMessage = "登录失败") }
-            }
-        }
     }
 }
